@@ -1,0 +1,86 @@
+document.addEventListener('DOMContentLoaded', () => {
+    const searchBox = document.getElementById('search-box');
+    const suggestionsBox = document.getElementById('suggestions-box');
+    const mainContent = document.getElementById('main-content');
+    const loader = document.getElementById('loader');
+    const errorMessage = document.getElementById('error-message');
+    const chartContainer = document.getElementById('chart-container');
+    const companyNameEl = document.getElementById('company-name');
+    const currentPriceEl = document.getElementById('current-price');
+
+    let tickers = [];
+    let chart = null;
+
+    // Cargar la lista de tickers desde el backend
+    async function loadTickers() {
+        try {
+            const response = await fetch('http://127.0.0.1:5000/api/get_tickers');
+            tickers = await response.json();
+        } catch (error) {
+            showError('No se pudo cargar la lista de acciones. Asegúrate de que el backend está funcionando.');
+        }
+    }
+
+    function showSuggestions(input) {
+        if (!input) {
+            suggestionsBox.classList.add('hidden');
+            return;
+        }
+        const filteredTickers = tickers.filter(t => t.toLowerCase().startsWith(input.toLowerCase())).slice(0, 10);
+        suggestionsBox.innerHTML = filteredTickers.map(t => `<div class="suggestion-item">${t}</div>`).join('');
+        suggestionsBox.classList.remove('hidden');
+    }
+
+    async function selectTicker(ticker) {
+        searchBox.value = ticker;
+        suggestionsBox.classList.add('hidden');
+        mainContent.classList.add('hidden');
+        loader.classList.remove('hidden');
+        errorMessage.classList.add('hidden');
+
+        try {
+            const response = await fetch(`http://127.0.0.1:5000/api/stock/${ticker}`);
+            const data = await response.json();
+
+            if (data.error) throw new Error(data.error);
+
+            companyNameEl.textContent = `${data.companyName} (${data.ticker})`;
+            currentPriceEl.textContent = `$${data.currentPrice.toFixed(2)}`;
+            
+            if (!chart) {
+                chart = LightweightCharts.createChart(chartContainer, {
+                    width: chartContainer.clientWidth,
+                    height: 500,
+                    layout: { backgroundColor: '#121212', textColor: '#e0e0e0' },
+                    grid: { vertLines: { color: '#333' }, horzLines: { color: '#333' } },
+                });
+            }
+            
+            const candlestickSeries = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350', wickUpColor: '#26a69a', wickDownColor: '#ef5350', borderVisible: false });
+            candlestickSeries.setData(data.chartData);
+            chart.timeScale().fitContent();
+
+            loader.classList.add('hidden');
+            mainContent.classList.remove('hidden');
+
+        } catch (error) {
+            showError(`Error al obtener datos para ${ticker}: ${error.message}`);
+        }
+    }
+
+    function showError(message) {
+        loader.classList.add('hidden');
+        mainContent.classList.add('hidden');
+        errorMessage.textContent = message;
+        errorMessage.classList.remove('hidden');
+    }
+
+    searchBox.addEventListener('input', () => showSuggestions(searchBox.value));
+    suggestionsBox.addEventListener('click', (e) => {
+        if (e.target.classList.contains('suggestion-item')) {
+            selectTicker(e.target.textContent);
+        }
+    });
+
+    loadTickers();
+});

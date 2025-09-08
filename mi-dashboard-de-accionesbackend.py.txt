@@ -1,0 +1,58 @@
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import yfinance as yf
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+import json
+import os
+
+app = Flask(__name__)
+CORS(app)
+
+TICKERS_FILE = 'tickers.json'
+
+def get_sp500_tickers():
+    url = 'http://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    table = soup.find('table', {'class': 'wikitable sortable'})
+    tickers = []
+    for row in table.findAll('tr')[1:]:
+        ticker = row.findAll('td')[0].text.strip().replace('.', '-')
+        tickers.append(ticker)
+    return tickers
+
+@app.route('/api/get_tickers')
+def get_tickers():
+    if os.path.exists(TICKERS_FILE):
+        with open(TICKERS_FILE, 'r') as f:
+            return jsonify(json.load(f))
+    try:
+        tickers = sorted(list(set(get_sp500_tickers())))
+        with open(TICKERS_FILE, 'w') as f:
+            json.dump(tickers, f)
+        return jsonify(tickers)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo obtener la lista de tickers: {e}"}), 500
+
+@app.route('/api/stock/<ticker>')
+def get_stock_data(ticker):
+    try:
+        stock = yf.Ticker(ticker.upper())
+        hist = stock.history(period="1y")
+        if hist.empty:
+            return jsonify({"error": "Datos no encontrados"}), 404
+        chart_data = [{"time": index.strftime('%Y-%m-%d'), "open": r.Open, "high": r.High, "low": r.Low, "close": r.Close} for index, r in hist.iterrows()]
+        info = stock.info
+        return jsonify({
+            "ticker": ticker.upper(),
+            "companyName": info.get('longName', 'N/A'),
+            "currentPrice": info.get('currentPrice', hist['Close'].iloc[-1]),
+            "chartData": chart_data
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
